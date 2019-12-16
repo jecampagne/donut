@@ -46,8 +46,13 @@ def train(args, model, device, train_loader, transforms, optimizer, epoch):
                               + args.sigma_noise*torch.randn(*new_img_batch.shape)
 
         # Clip the images to be between 0 and 1
-        new_img_batch_noisy.clamp_(0.,1.)
+        #        new_img_batch_noisy.clamp_(0.,1.)
 
+        # alternative way for noise & cliping
+        scaler = MinMaxScaler()
+        for i in range(batch_size):
+            new_img_batch[i] = scaler(new_img_batch[i])
+            new_img_batch_noisy[i] = scaler(new_img_batch_noisy[i])
 
         # send the inputs and target to the device
         new_img_batch,  new_img_batch_noisy = new_img_batch.to(device), \
@@ -56,13 +61,7 @@ def train(args, model, device, train_loader, transforms, optimizer, epoch):
         # perform the optimizer loop
         optimizer.zero_grad()
         outputs = model(new_img_batch_noisy)
-
-        print('MinMax In,Noisy,Out: ',
-              new_img_batch.min(),'/',new_img_batch.max(),', ',
-              new_img_batch_noisy.min(),'/',new_img_batch_noisy.max(),', ',
-              outputs.min(),'/',outputs.max())
         
-
         loss = F.mse_loss(outputs, new_img_batch)
         train_loss += loss.item() * batch_size
         loss.backward()
@@ -85,7 +84,7 @@ def main():
         no_cuda = False,
         epochs = 100,
         crop_size = 64,      # 2^n, max = 512 = no crop, the smaller the more data augmentation
-        sigma_noise =0.1,    # to be defined
+        sigma_noise =0.02,    # to be defined
         dir_path="/sps/lsst/data/campagne/convergence/",
         redshift=0.5,
         file_tag = "WLconv_z$0_",  # $ is a placeholder
@@ -135,15 +134,14 @@ def main():
                                          [rot90,rot180,rot270,identity]
                                          ]),
                         RandomCrop(size=args.crop_size),
-                        MinMaxScaler(),
                         ToTensorKapa()]
 
 
     # The Network
 ##    model = ConvDenoiser()
-    model = ConvDenoiserUp()
+##    model = ConvDenoiserUp()
 ##    model = ConvDenoiserUpV1()
-##    model = REDNet30()
+    model = REDNet30()
     # put model to device before loading scheduler/optimizer parameters
     model.to(device)
 
