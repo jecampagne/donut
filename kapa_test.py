@@ -169,7 +169,8 @@ def main():
     # The Network
 ##    model = ConvDenoiserUp()
 ##    model = ConvDenoiserUpV1()
-    model = REDNet30()
+##    model = REDNet30()
+    model = DnCNN()
     # put model to device before loading scheduler/optimizer parameters
     model.to(device)
     # load trained state

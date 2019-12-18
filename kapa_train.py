@@ -2,7 +2,7 @@ import random
 import types
 import os
 
-import swats
+#import swats
 
 
 # the Network Model Classes
@@ -11,9 +11,14 @@ from kapa_network import *
 from kapa_image_manip import *
 
 
-# ####################### Train ###########################
+# ####################### Training FFDNet  ###########################
+def train_ffdnet(args, model, device, train_loader, transforms, optimizer, epoch):
+    return
+    
 
-def train(args, model, device, train_loader, transforms, optimizer, epoch):
+# ####################### Training Generic  ###########################
+
+def train(args, model, device, train_loader, transforms, optimizer, epoch, use_clipping=True):
 
     assert transforms
 
@@ -45,14 +50,17 @@ def train(args, model, device, train_loader, transforms, optimizer, epoch):
         new_img_batch_noisy = new_img_batch \
                               + args.sigma_noise*torch.randn(*new_img_batch.shape)
 
-        # Clip the images to be between 0 and 1
-        #        new_img_batch_noisy.clamp_(0.,1.)
 
-        # alternative way for noise & cliping
-        scaler = MinMaxScaler()
-        for i in range(batch_size):
-            new_img_batch[i] = scaler(new_img_batch[i])
-            new_img_batch_noisy[i] = scaler(new_img_batch_noisy[i])
+        if use_clipping:
+            # Clip the images to be between 0 and 1
+            #        new_img_batch_noisy.clamp_(0.,1.)
+            
+            # alternative way for noise & cliping
+            scaler = MinMaxScaler()
+            for i in range(batch_size):
+                new_img_batch[i] = scaler(new_img_batch[i])
+                new_img_batch_noisy[i] = scaler(new_img_batch_noisy[i])
+
 
         # send the inputs and target to the device
         new_img_batch,  new_img_batch_noisy = new_img_batch.to(device), \
@@ -100,6 +108,12 @@ def main():
 
     start_epoch = 0
 
+    print("\n### Training model ###")
+    print("> Parameters:")
+    for p, v in zip(args.__dict__.keys(), args.__dict__.values()):
+        print('\t{}: {}'.format(p, v))
+
+
 
     #Define the train path
     strz = str(args.redshift).replace('.','')
@@ -125,7 +139,7 @@ def main():
         batch_size=args.batch_size,drop_last=True,
         shuffle=True, **kwargs)
 
-    print("train_loader length=",len(train_loader))
+    print("train_loader length=",len(train_loader)," all: ", len(train_loader.dataset))
     n_images = len(train_dataset)
     args.log_interval = (n_images//args.batch_size)//10
 
@@ -137,11 +151,14 @@ def main():
                         ToTensorKapa()]
 
 
-    # The Network
+    # The Networks with clipping [0,1] required
 ##    model = ConvDenoiser()
 ##    model = ConvDenoiserUp()
 ##    model = ConvDenoiserUpV1()
-    model = REDNet30()
+##    model = REDNet30()
+    # 
+    model = DnCNN()
+    
     # put model to device before loading scheduler/optimizer parameters
     model.to(device)
 
