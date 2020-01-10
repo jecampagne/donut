@@ -8,11 +8,27 @@ parser.add_argument('--tag', type=str, required=True)
 args = parser.parse_args()
 data = np.load(args.file)
 
-plt.plot(data, label="train")
-plt.xlabel('epoch')
-plt.ylabel('Cross Entropy loss')
-plt.legend()
-plt.grid()
+train_loss = data[0]
+test_loss = data[1]
+test_psnr = data[2]
+
+fig, ax1 = plt.subplots()
+ax1.plot(train_loss, label="train", color='tab:blue')
+ax1.plot(test_loss, label="test", color='tab:orange')
+ax1.set_xlabel('epoch')
+ax1.set_ylabel('Cross Entropy loss')
+ax1.tick_params(axis='y')
+ax1.grid()
+ax1.legend()
+
+
+ax2 = ax1.twinx()
+ax2.plot(test_psnr, color='tab:green')
+ax2.set_ylabel('PSNR')
+ax2.tick_params(axis='y', labelcolor='tab:green')
+
+plt.title(args.tag,fontsize=16)
+fig.tight_layout()
 
 plt.savefig('history_'+args.tag+'.png')
 plt.show()

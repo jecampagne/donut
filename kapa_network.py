@@ -100,7 +100,7 @@ class ConvDenoiserUp(nn.Module):
         return x
 
 #####################
-# version with interpolation : upsample
+# More layers than ConvDenoiserUp
 class ConvDenoiserUpV1(nn.Module):
     def __init__(self):
         super(ConvDenoiserUpV1, self).__init__()

@@ -26,6 +26,7 @@ class MinMaxScaler(object):
     def __init__(self):
         self.min_ = 0.0
         self.max_ = 1.0
+        self.scale_ = 1.0
         self.inv_scale_ = 1.0
     def __call__(self, X):
         self.max_ = X.max()
@@ -35,10 +36,10 @@ class MinMaxScaler(object):
         if dist ==0.:  # pathology
             print("MinMaxScaler error min=max")
             dist = 1.
-        scale = 1.0 / dist
+        self.scale_ = 1.0 / dist
         self.inv_scale_ = dist
 ##        print(scale,self.inv_scale_)
-        return (X-self.min_)*scale
+        return (X-self.min_)*self.scale_
     def inverse_transform(self, X):
 ##        print(self.min_, self.inv_scale_)
         return X*self.inv_scale_+self.min_
