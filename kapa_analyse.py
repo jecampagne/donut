@@ -40,16 +40,19 @@ def extractPatches(img,*,patch_size_x=64,patch_size_y=64,type='numpy'):
             list_of_patches.append(data[idy:idy+patch_size_y,idx:idx+patch_size_x,:])
 
     # attention au reshaping
-    lop = np.array(list_of_patches).reshape(n_y,n_x,patch_size_y,patch_size_x,c)
+    lop = np.array(list_of_patches)#.reshape(n_y,n_x,patch_size_y,patch_size_x,c)
     if type == 'torch':
-        return torch.from_numpy(lop)
+        return torch.from_numpy(lop),n_x,n_y
     else:
-        lop
+        return lop,n_x,n_y
 
 ## #########
 def gluePatches(lop,type='numpy'):
-    # HWC for numpy and torch tensors
-    ny,nx,psy,psx,c = lop.shape
+    # input  NyNxHWC
+    # output HWC
+    print('gluePatches: input shape: ',lop.shape)
+    ny,nx,psy,psx,c= lop.shape
+    assert c==1,f'Hum! Bizarre the number of channels is equal to {c}'
     img = np.zeros((ny*psy,nx*psx,c)) # numpy
     for j in range(ny):
         idy =j*psy
@@ -66,8 +69,12 @@ def gluePatches(lop,type='numpy'):
 def display(img_orig, img_noisy, img_denoised, figsize=(10,10)):
 
     n = img_orig.shape[0]
+
+    print("n,img(orig/noisy/denoised) shape:\n",
+          img_orig.shape, img_noisy.shape,  img_denoised.shape
+          )
     
-    fig = plt.figure(figsize=(3,n))
+    fig = plt.figure(figsize=figsize)
     gs = gridspec.GridSpec(nrows=n, ncols=3,wspace=0.0, hspace=0.0)
 
     for i in range(n):
@@ -206,31 +213,39 @@ def test_multipatches(args, model, device, test_loader, transforms):
                 imgn0 = imgn # for dbg
                 scalern = MinMaxScaler()
                 imgn = scalern(imgn)
-                assert np.isclose(img0,scaler.inverse_transform(img)), "gros (1) pb de re-scaling" 
-                assert np.isclose(imgn0,scalern.inverse_transform(imgn)), "gros (2) pb de re-scaling"
+                print('img0 shape:',img0.shape)
+                assert np.allclose(img0,scaler.inverse_transform(img)), "gros (1) pb de re-scaling" 
+                assert np.allclose(imgn0,scalern.inverse_transform(imgn)), "gros (2) pb de re-scaling"
+                print('assert rescaling (1) & (2) OK')
+
                 # At this stage img & imgn pixel values are in [0,1]
                 # mini batch composed by extraction of patches
-                orig_patches = extracPatches(img,
+                orig_patches,n_x,n_y = extractPatches(img,
                                              patch_size_x=args.test_crop_size,
                                              patch_size_y=args.test_crop_size
                                         )
-                noisy_patches = extracPatches(imgn,
+
+                print('orig_patches shape: ',orig_patches.shape, ' type: ',orig_patches.dtype)
+                
+                noisy_patches,_,_ = extractPatches(imgn,
                                               patch_size_x=args.test_crop_size,
                                               patch_size_y=args.test_crop_size
                                               )
                 
-                # to tensors
-                transf_order = ToTensorKapa()
-                orig_patches = transf_order(torch.from_numpy(orig_patches)).to(torch.float32)
-                noisy_patches = transf_order(torch.from_numpy(noisy_patches)).to(torch.float32)
+                print('noisy_patches shape: ',noisy_patches.shape, ' type: ',noisy_patches.dtype)
+                
+                # to tensor + NHWC -> NCHW
+                
+                orig_patches = torch.from_numpy(orig_patches.transpose(0,3,1,2).copy()).to(torch.float32)
+                noisy_patches = torch.from_numpy(noisy_patches.transpose(0,3,1,2).copy()).to(torch.float32)
+
+                print('orig_patches shape: ',orig_patches.shape, ' type: ',orig_patches.dtype)
+                print('noisy_patches shape: ',noisy_patches.shape, ' type: ',noisy_patches.dtype)
+                
 
                 # to device
                 orig_patches, noisy_patches = orig_patches.to(device), \
                                               noisy_patches.to(device)
-            
-
-            
-
 
                 # denoise
                 denoised_patches = model(noisy_patches)
@@ -239,24 +254,50 @@ def test_multipatches(args, model, device, test_loader, transforms):
                 test_loss += loss.item()
 
                 # rebuild the images from the patches
+                # NCHW -> NyNx HWC  with N=Ny*Nx
+                print('before rebuild: orig_patches shape: ', orig_patches.shape)
+                orig_patches = orig_patches.cpu().view(n_y,n_x,
+                                                       orig_patches.shape[2],
+                                                       orig_patches.shape[3],
+                                                       orig_patches.shape[1])
                 img_test = gluePatches(orig_patches) # for test
-                assert np.isclose(img,img_test), "rebuild img original failed"
+                assert np.allclose(img,img_test), "rebuild img original failed"
+
+                
+                denoised_patches = denoised_patches.cpu().view(n_y,n_x,
+                                                               denoised_patches.shape[2],
+                                                               denoised_patches.shape[3],
+                                                               denoised_patches.shape[1]
+                                                               )
                 img_denoised = gluePatches(denoised_patches)
 
                 # rescaling
-                img_test_rescaled = scaler.inverse_transform(img_test)
-                assert np.isclose(img0,img_test_rescaled), "gros (3) pb de re-scaling"
-                img_denoised_rescaled = scalern.inverse_transform(img_denoised)
+#                img_test_rescaled = scaler.inverse_transform(img_test)
+#                assert np.allclose(img0,img_test_rescaled), "gros (3) pb de re-scaling"
+#                
+#                img_denoised_rescaled = scalern.inverse_transform(img_denoised)
                 
                 #psnr
-                test_psnr += peak_signal_noise_ratio(img0,img_denoised_rescaled)
+#                test_psnr += peak_signal_noise_ratio(img0,img_denoised_rescaled)
+                test_psnr += peak_signal_noise_ratio(img,img_denoised)
 
                 # display
+                
                 if i_batch == 0 and i<5:
-                    display(img0,
-                            imgn0,
-                            img_denoised_rescaled,
-                            figsize=(10,10))
+##                     print('img0 :                 shape = ',img0.shape)
+##                     print('imgn0:                 shape = ',imgn0.shape)
+##                     print('img_denoised_rescaled: shape = ',img_denoised_rescaled.shape)
+##                     display(np.expand_dims(img0,axis=0),
+##                             np.expand_dims(imgn0,axis=0),
+##                             np.expand_dims(img_denoised_rescaled,axis=0),
+##                             figsize=(10,10))
+                    print('img :                 shape = ',img.shape)
+                    print('imgn:                 shape = ',imgn.shape)
+                    print('img_denoised:         shape = ',img_denoised.shape)
+                    display(np.expand_dims(img,axis=0),
+                            np.expand_dims(imgn,axis=0),
+                            np.expand_dims(img_denoised,axis=0),
+                            figsize=(15,5))
 
 
     # return stat
@@ -275,20 +316,20 @@ def main():
         file_tag = "WLconv_z$0_",  # $ is a placeholder
         #
         test_batch_size = 100,
-        test_crop_size = 64,
+        test_crop_size = 128,
         test_sigma_noise = 0.02,
         test_redshift = 0.5,
         test_file_range = (9000,10000),
         #
         root_file = "/sps/lsst/users/campagne/kapaconv/",
-#        checkpoint_file ="DnCNN_64x64_20depth.pth",
-        checkpoint_file ="REDNet30_64x64.pth",
+        checkpoint_file ="DnCNN_128x128.pth",
+#        checkpoint_file ="REDNet30_64x64.pth",
         )
 
     args.checkpoint_file = args.root_file + args.checkpoint_file
 
 
-    print("\n### Training model ###")
+    print("\n### Analysis model ###")
     print("> Parameters:")
     for p, v in zip(args.__dict__.keys(), args.__dict__.values()):
         print('\t{}: {}'.format(p, v))
@@ -322,8 +363,8 @@ def main():
 
     test_transforms = [ToTensorKapa()]
 
-##    model = DnCNN(depth=20)
-    model = REDNet30()
+    model = DnCNN()
+##    model = REDNet30()
     model.to(device)
 
     # load checkpoint of model/scheduler/optimizer
