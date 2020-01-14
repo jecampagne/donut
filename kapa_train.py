@@ -80,7 +80,7 @@ def train(args, model, device, train_loader, transforms, optimizer, epoch, use_c
 
 # ####################### Test Generic  ###########################
 
-def test(args, model, device, test_loader, transforms, epoch):
+def test(args, model, device, test_loader, transforms, epoch, use_clipping=True):
     # switch network layers to Testing mode
     model.eval()
 
@@ -110,22 +110,20 @@ def test(args, model, device, test_loader, transforms, epoch):
             new_img_batch_noisy = new_img_batch \
                                   + args.test_sigma_noise*torch.randn(*new_img_batch.shape)
 
-            # Clip the images to be between 0 and 1
-            # new_img_batch_noisy.clamp_(0.,1.)
-
-            # alternative way for noise & cliping using MinMaxScaler (min,max) -> [0,1]
-            scaler = MinMaxScaler()
-            for i in range(batch_size):
-                new_img_batch[i] = scaler(new_img_batch[i])
-                new_img_batch_noisy[i] = scaler(new_img_batch_noisy[i])
-            
-
-            
+            if use_clipping:
+                # Clip the images to be between 0 and 1
+                # new_img_batch_noisy.clamp_(0.,1.)
+                
+                # alternative way for noise & cliping using MinMaxScaler (min,max) -> [0,1]
+                scaler = MinMaxScaler()
+                for i in range(batch_size):
+                    new_img_batch[i] = scaler(new_img_batch[i])
+                    new_img_batch_noisy[i] = scaler(new_img_batch_noisy[i])
+                    
 
             # send the inputs and target to the device
             new_img_batch,  new_img_batch_noisy = new_img_batch.to(device), \
                                                   new_img_batch_noisy.to(device)
-
 
             # denoise
             outputs = model(new_img_batch_noisy)
@@ -149,30 +147,35 @@ def main():
 
     args = types.SimpleNamespace(
         no_cuda = False,
-
-        batch_size = 100,
+        model = "DnCNN", # (ConvDenoiser, ConvDenoiserUp, ConvDenoiserUpV1, REDNet10,20,30), DnCNN
+        use_clipping = False,  # for DnCNN
+        batch_size = 64,
         epochs = 30,
-        crop_size = 64,      # 2^n, max = 512 = no crop, the smaller the more data augmentation
+        crop_size = 128,      # 2^n, max = 512 = no crop, the smaller the more data augmentation
         sigma_noise =0.02,    # to be defined  
         dir_path="/sps/lsst/data/campagne/convergence/",
         redshift=0.5,
         file_tag = "WLconv_z$0_",  # $ is a placeholder
         file_range = (1,5001), # 1 to 9999 max
         #
-        test_batch_size = 100,
-        test_crop_size = 64,
+        test_batch_size = 64,
+        test_crop_size = 128,
         test_sigma_noise = 0.02,
         test_redshift = 0.5,
         test_file_range = (5001,8001),
         #
         use_scheduler = True,
-        resume = False,
-        resume_scheduler = False,
-        resume_optimizer = False,
+        resume = True,
+        resume_scheduler = True,
+        resume_optimizer = True,
         root_file = "/sps/lsst/users/campagne/kapaconv/",
-        checkpoint_file ="model.pth",
-        history_loss_cpt_file=""
+        checkpoint_file ="model_DnCNN_128.pth.sav",
+        history_loss_cpt_file="history_DnCNN_128.npy.sav"
         )
+
+    if args.use_clipping == False and args.model != "DnCNN":
+        print("model {args.model} use clipping, so we switch defacto")
+        args.use_clipping = True
 
     start_epoch = 0
 
@@ -242,14 +245,20 @@ def main():
 
 
     # The Networks with clipping [0,1] required
-##    model = ConvDenoiser()
-##    model = ConvDenoiserUp()
-##    model = ConvDenoiserUpV1()
-    model = REDNet30()
-    # 
-##    model = DnCNN()
+    if args.model == "ConvDenoiser":
+        model = ConvDenoiser()
+    elif args.model == "ConvDenoiserUp":
+        model = ConvDenoiserUp()
+    elif args.model == "ConvDenoiserUpV1":
+        model = ConvDenoiserUpV1()
+    elif args.model == "REDNet30":
+        model = REDNet30()
+    elif args.model == "DnCNN":
+        model = DnCNN()
+    else:
+        assert False, "model unknown"
     
-
+        
     model.to(device)
 
     # specify loss function
@@ -289,6 +298,12 @@ def main():
     train_loss_history = []
     test_loss_history  = []
     test_psnr_history  = []
+
+
+
+
+
+    
     for epoch in range(start_epoch, args.epochs + 1):
 
         print("process epoch[",epoch,"]: LR = ",end='')
@@ -296,8 +311,10 @@ def main():
             print(param_group['lr'])
 
         
-        train_loss = train(args, model, device, train_loader, train_transforms, optimizer, epoch)
-        test_loss = test(args, model, device, test_loader, test_transforms, epoch)
+        train_loss = train(args, model, device, train_loader, train_transforms, optimizer, epoch,
+                           use_clipping = args.use_clipping)
+        test_loss = test(args, model, device, test_loader, test_transforms, epoch,
+                         use_clipping = args.use_clipping)
 
 
         print('Epoch {}, Train Loss: {:.6f}, Test Loss: {:.6f}, Test PSNR: {:.3f}'.format(epoch,train_loss,test_loss['loss'],test_loss['psnr']))
@@ -322,10 +339,13 @@ def main():
                 'model_state_dict': model.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict()
                 }
-        torch.save(state,args.root_file+"/model.pth")
+
+        s_clip = "_clip" if args.use_clipping else ""
+        f_name = args.model+"_"+str(args.crop_size)+s_clip
+        torch.save(state,args.root_file+"/model_"+f_name+".pth")
         
         # save intermediate history
-        np.save(args.root_file+"/history.npy",
+        np.save(args.root_file+"/history_"+f_name+".npy",
                 np.array((train_loss_history,test_loss_history,test_psnr_history))
                 )
 
