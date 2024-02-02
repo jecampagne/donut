@@ -186,7 +186,7 @@ def test(args, model, device, test_loader, transforms):
     return {'loss': test_loss, 'psnr': test_psnr}
 
 ## ####################
-def test_multipatches(args, model, device, test_loader, transforms):
+def test_multipatches(args, model, device, test_loader, transforms, use_clipping=True):
     # switch network layers to Testing mode
     model.eval()
 
@@ -204,19 +204,20 @@ def test_multipatches(args, model, device, test_loader, transforms):
 
             for i in range(batch_size):
                 # transform the images
-                scaler = MinMaxScaler()
+                
+                scaler = MinMaxScaler() if use_clipping else IdtyScaler()
                 img  = img_batch[i].numpy()
                 img0 = img # original
                 imgn = img # clone for noise
                 img  = scaler(img) # scaling
                 imgn = imgn + args.test_sigma_noise*np.random.randn(*imgn.shape)
                 imgn0 = imgn # for dbg
-                scalern = MinMaxScaler()
+                scalern = MinMaxScaler() if use_clipping else IdtyScaler()
                 imgn = scalern(imgn)
-                print('img0 shape:',img0.shape)
+#                print('img0 shape:',img0.shape)
                 assert np.allclose(img0,scaler.inverse_transform(img)), "gros (1) pb de re-scaling" 
                 assert np.allclose(imgn0,scalern.inverse_transform(imgn)), "gros (2) pb de re-scaling"
-                print('assert rescaling (1) & (2) OK')
+#               print('assert rescaling (1) & (2) OK')
 
                 # At this stage img & imgn pixel values are in [0,1]
                 # mini batch composed by extraction of patches
@@ -225,22 +226,22 @@ def test_multipatches(args, model, device, test_loader, transforms):
                                              patch_size_y=args.test_crop_size
                                         )
 
-                print('orig_patches shape: ',orig_patches.shape, ' type: ',orig_patches.dtype)
+#                print('orig_patches shape: ',orig_patches.shape, ' type: ',orig_patches.dtype)
                 
                 noisy_patches,_,_ = extractPatches(imgn,
                                               patch_size_x=args.test_crop_size,
                                               patch_size_y=args.test_crop_size
                                               )
                 
-                print('noisy_patches shape: ',noisy_patches.shape, ' type: ',noisy_patches.dtype)
+#                print('noisy_patches shape: ',noisy_patches.shape, ' type: ',noisy_patches.dtype)
                 
                 # to tensor + NHWC -> NCHW
                 
                 orig_patches = torch.from_numpy(orig_patches.transpose(0,3,1,2).copy()).to(torch.float32)
                 noisy_patches = torch.from_numpy(noisy_patches.transpose(0,3,1,2).copy()).to(torch.float32)
 
-                print('orig_patches shape: ',orig_patches.shape, ' type: ',orig_patches.dtype)
-                print('noisy_patches shape: ',noisy_patches.shape, ' type: ',noisy_patches.dtype)
+#                print('orig_patches shape: ',orig_patches.shape, ' type: ',orig_patches.dtype)
+#                print('noisy_patches shape: ',noisy_patches.shape, ' type: ',noisy_patches.dtype)
                 
 
                 # to device
@@ -255,7 +256,7 @@ def test_multipatches(args, model, device, test_loader, transforms):
 
                 # rebuild the images from the patches
                 # NCHW -> NyNx HWC  with N=Ny*Nx
-                print('before rebuild: orig_patches shape: ', orig_patches.shape)
+#                print('before rebuild: orig_patches shape: ', orig_patches.shape)
                 orig_patches = orig_patches.cpu().view(n_y,n_x,
                                                        orig_patches.shape[2],
                                                        orig_patches.shape[3],
@@ -291,9 +292,9 @@ def test_multipatches(args, model, device, test_loader, transforms):
 ##                             np.expand_dims(imgn0,axis=0),
 ##                             np.expand_dims(img_denoised_rescaled,axis=0),
 ##                             figsize=(10,10))
-                    print('img :                 shape = ',img.shape)
-                    print('imgn:                 shape = ',imgn.shape)
-                    print('img_denoised:         shape = ',img_denoised.shape)
+##                    print('img :                 shape = ',img.shape)
+##                    print('imgn:                 shape = ',imgn.shape)
+##                    print('img_denoised:         shape = ',img_denoised.shape)
                     display(np.expand_dims(img,axis=0),
                             np.expand_dims(imgn,axis=0),
                             np.expand_dims(img_denoised,axis=0),
@@ -311,6 +312,8 @@ def main():
     
     args = types.SimpleNamespace(
         no_cuda = False,
+        model = "DnCNN", # (ConvDenoiser, ConvDenoiserUp, ConvDenoiserUpV1, REDNet10,20,30), DnCNN
+        use_clipping = False,  # for DnCNN
         #
         dir_path="/sps/lsst/data/campagne/convergence/",
         file_tag = "WLconv_z$0_",  # $ is a placeholder
@@ -322,9 +325,14 @@ def main():
         test_file_range = (9000,10000),
         #
         root_file = "/sps/lsst/users/campagne/kapaconv/",
-        checkpoint_file ="DnCNN_128x128.pth",
+        checkpoint_file ="model_DnCNN_128.pth",
 #        checkpoint_file ="REDNet30_64x64.pth",
         )
+
+    # Verify arguments compatibility 
+    if args.use_clipping == False and args.model != "DnCNN":
+        print("model {args.model} use clipping, so we switch defacto")
+        args.use_clipping = True
 
     args.checkpoint_file = args.root_file + args.checkpoint_file
 
@@ -363,8 +371,20 @@ def main():
 
     test_transforms = [ToTensorKapa()]
 
-    model = DnCNN()
-##    model = REDNet30()
+    # Some Networks clipping [0,1] is required: 
+    if args.model == "ConvDenoiser":
+        model = ConvDenoiser()
+    elif args.model == "ConvDenoiserUp":
+        model = ConvDenoiserUp()
+    elif args.model == "ConvDenoiserUpV1":
+        model = ConvDenoiserUpV1()
+    elif args.model == "REDNet30":
+        model = REDNet30()
+    elif args.model == "DnCNN":
+        model = DnCNN()
+    else:
+        assert False, "model unknown"
+
     model.to(device)
 
     # load checkpoint of model/scheduler/optimizer
@@ -379,7 +399,8 @@ def main():
 
     
     
-    test_loss = test_multipatches(args, model, device, test_loader, test_transforms)
+    test_loss = test_multipatches(args, model, device, test_loader, test_transforms,
+                                  use_clipping=args.use_clipping)
     print('test_loss: ',test_loss)
 
 ################################
