@@ -19,6 +19,16 @@ import matplotlib.gridspec as gridspec
 #data, hdr = getdata("WLconv_z0.50_0002r.fits", 0, header=True)
 
 
+class IdtyScaler(object):
+    """
+    Identity
+    """
+    def __call__(self, X):
+        return X
+    def inverse_transform(self, X):
+        return X
+
+
 class MinMaxScaler(object):
     """
     Scale to [0, 1] range and get back
