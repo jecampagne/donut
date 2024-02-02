@@ -173,11 +173,11 @@ def main():
         history_loss_cpt_file="history_DnCNN_128.npy.sav"
         )
 
+    # Verify arguments compatibility 
     if args.use_clipping == False and args.model != "DnCNN":
         print("model {args.model} use clipping, so we switch defacto")
         args.use_clipping = True
 
-    start_epoch = 0
 
     print("\n### Training model ###")
     print("> Parameters:")
@@ -244,7 +244,7 @@ def main():
                        ToTensorKapa()]
 
 
-    # The Networks with clipping [0,1] required
+    # Some Networks clipping [0,1] is required: 
     if args.model == "ConvDenoiser":
         model = ConvDenoiser()
     elif args.model == "ConvDenoiserUp":
@@ -299,12 +299,46 @@ def main():
     test_loss_history  = []
     test_psnr_history  = []
 
+    start_epoch = 0
+    if args.resume :
+        # load checkpoint of model/scheduler/optimizer
+        if os.path.isfile(args.checkpoint_file):
+            print("=> loading checkpoint '{}'".format(args.checkpoint_file))
+            checkpoint = torch.load(args.checkpoint_file)
+            # the first epoch for the new training
+            start_epoch = checkpoint['epoch']
+            # model update state
+            model.load_state_dict(checkpoint['model_state_dict'])
+            if args.resume_scheduler:
+                # scheduler update state
+                scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+            else:
+                print('=>>> scheduler not resumed')
+            if args.resume_optimizer:
+                # optizimer update state
+                optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            else:
+                print('=>>> optimizer not resumed')
+            print("=> loaded checkpoint")
+        else:
+            print("=> FATAL no  checkpoint '{}'".format(args.checkpoint_file))
+            return
 
-
-
+        #load previous history of losses
+        if os.path.isfile(args.history_loss_cpt_file):
+            loss_history = np.load(args.history_loss_cpt_file)
+            train_loss_history = loss_history[0].tolist()
+            test_loss_history  = loss_history[1].tolist()
+            test_psnr_history  = loss_history[2].tolist()
+            
+        else:
+            print("=> FATAL no history loss checkpoint '{}'".format(args.history_loss_cpt_file))
+            return
+    else:
+        print("=> no checkpoints then Go as fresh start")
 
     
-    for epoch in range(start_epoch, args.epochs + 1):
+    for epoch in range(start_epoch, start_epoch + args.epochs + 1):
 
         print("process epoch[",epoch,"]: LR = ",end='')
         for param_group in optimizer.param_groups:
